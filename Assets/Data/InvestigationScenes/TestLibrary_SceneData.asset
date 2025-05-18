@@ -16,6 +16,7 @@ MonoBehaviour:
   cluesInScene:
   - {fileID: 11400000, guid: e44a81c910680644c89adc4e6aa7a4cd, type: 2}
   - {fileID: 11400000, guid: 2d90422b24c895c4c8ed74ad7da46cc8, type: 2}
+  - {fileID: 11400000, guid: 3a0b63c413fb54e4aa61ab9f523eefa8, type: 2}
   charactersInScene: []
   availableWitnesses: []
   basePoliceTimerSeconds: 120

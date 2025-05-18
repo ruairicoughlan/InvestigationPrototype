@@ -1,0 +1,40 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e8fda7d39ee2c114ab95faff2771e68f, type: 3}
+  m_Name: Ceiling
+  m_EditorClassIdentifier: 
+  clueID: CeilingLibrary
+  clueName: Ceiling
+  initialPerceptionSkill: 1
+  initialPerceptionDC: 0
+  clueWorldSprite: {fileID: 0}
+  worldPosition: {x: -10, y: 459}
+  visualScale: {x: 1, y: 1}
+  colliderSize: {x: 500, y: 150}
+  baseDescription: A sign-in book, probably used to keep track of who was using the
+    architectural archives.   Looks like nobody even came in here for years, until
+    one Emile Laurence turns up.
+  cluePopupImage: {fileID: 21300000, guid: b880f68ca10b4fa4d8d46bf673a50cfd, type: 3}
+  requiresSkillCheckForMoreInfo: 1
+  skillCheckType: 2
+  skillCheckDC: 30
+  successDescription: "The skylight above could have been an entrance, I suppose.
+    Although, now that I\u2019m looking at it, there\u2019s no signs of the locks
+    or hatches being manipulated. \n\nIf the thief entered, they didn\u2019t break
+    in from the roof. They came in on ground level. And Serena already said none
+    of the other doors look like there was a forced entry. They either picked the
+    locks or had the doors opened...."
+  failureDescription: The skylight above could have been an entrance, I suppose.
+  isKeyEvidence: 0
+  relatedCaseID: 
+  relatedObjectiveID: 
+  caseFlagToSet: 

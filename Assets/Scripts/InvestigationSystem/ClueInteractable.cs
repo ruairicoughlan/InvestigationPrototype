@@ -1,20 +1,19 @@
 using UnityEngine;
-using UnityEngine.UI; // For potential UI elements like a pop-up
-// Add any other necessary namespaces (e.g., for TextMeshPro if you use it for pop-ups)
+using UnityEngine.UI; // Keep if your prefab might use UI elements, though current logic uses SpriteRenderer
 
 public class ClueInteractable : MonoBehaviour
 {
     public ClueData clueData; // Reference to the ScriptableObject asset
+    
+    // Internal state
     private bool isInteractable = false;
-    private bool hasBeenInteractedWith = false; // To prevent multiple interactions if needed or change behavior
+    private bool hasBeenInteractedWith = false; // To prevent re-interaction or change behavior after first interaction
 
-    // References to be set by InvestigationManager or found if needed
+    // Cached references
     private InvestigationManager investigationManager;
     private GameStateManager gameStateManager;
-
-    // Optional: Reference to a generic Clue UI Pop-up prefab/manager
-    // public GameObject cluePopupPrefab;
-    // public UIManager uiManager; // If you have a central UI manager
+    private SpriteRenderer spriteRenderer; // Optional: if you directly manipulate it often
+    private BoxCollider2D boxCollider; // Optional: if you directly manipulate it often
 
     public void Initialize(ClueData data, InvestigationManager invManager, GameStateManager stateManager)
     {
@@ -22,110 +21,142 @@ public class ClueInteractable : MonoBehaviour
         investigationManager = invManager;
         gameStateManager = stateManager;
 
+        // Cache components
+        spriteRenderer = GetComponent<SpriteRenderer>();
+        if (spriteRenderer == null && clueData.clueWorldSprite != null) // Only add if a world sprite is expected
+        {
+            spriteRenderer = gameObject.AddComponent<SpriteRenderer>();
+            Debug.LogWarning($"Clue '{clueData.clueName}' was missing a SpriteRenderer. One was added. Ensure prefab is set up correctly if this is unexpected.");
+        }
+        
+        boxCollider = GetComponent<BoxCollider2D>();
+        if (boxCollider == null)
+        {
+            boxCollider = gameObject.AddComponent<BoxCollider2D>();
+            Debug.LogWarning($"Clue '{clueData.clueName}' was missing a BoxCollider2D. One was added.");
+        }
+
         // Set up the visual representation
-        if (clueData.clueWorldSprite != null)
+        if (spriteRenderer != null) // Check if SpriteRenderer exists
         {
-            SpriteRenderer sr = GetComponent<SpriteRenderer>();
-            if (sr == null) sr = gameObject.AddComponent<SpriteRenderer>();
-            sr.sprite = clueData.clueWorldSprite;
-            // You might want to adjust sorting order, scale, etc.
-        }
-        else // If no world sprite, it might be a hotspot on a background. Ensure renderer is off if one exists.
-        {
-            SpriteRenderer sr = GetComponent<SpriteRenderer>();
-            if (sr != null) sr.enabled = false;
-        }
-
-
-        // Set up the collider
-        BoxCollider2D bc = GetComponent<BoxCollider2D>();
-        if (bc == null) bc = gameObject.AddComponent<BoxCollider2D>();
-        if (clueData.colliderSize != Vector2.zero)
-        {
-            bc.size = clueData.colliderSize;
-        }
-        else // Default collider size if not specified
-        {
-            bc.size = Vector2.one; // Or based on sprite bounds if sprite exists
-        }
-        bc.isTrigger = true; // Usually good for click interactions if using OnMouseDown or physics raycasts
-
-        // Perform initial perception check
-        if (gameStateManager != null && clueData.initialPerceptionSkill != InvestigationSkillType.None && clueData.initialPerceptionDC > 0)
-        {
-            int playerSkill = gameStateManager.GetSkillLevel(clueData.initialPerceptionSkill.ToString());
-            isInteractable = playerSkill >= clueData.initialPerceptionDC;
-            if (!isInteractable)
+            if (clueData.clueWorldSprite != null)
             {
-                Debug.Log($"Clue '{clueData.clueName}' is NOT interactable due to failed perception check (Player {clueData.initialPerceptionSkill}: {playerSkill} vs DC: {clueData.initialPerceptionDC}). Hiding.");
-                gameObject.SetActive(false);
+                spriteRenderer.sprite = clueData.clueWorldSprite;
+                spriteRenderer.enabled = true;
             }
             else
             {
-                 Debug.Log($"Clue '{clueData.clueName}' IS interactable due to passed perception check (Player {clueData.initialPerceptionSkill}: {playerSkill} vs DC: {clueData.initialPerceptionDC}).");
+                // If no world sprite, it might be an invisible hotspot or part of background.
+                // If SpriteRenderer exists but no sprite, disable it.
+                spriteRenderer.enabled = false;
             }
         }
-        else // No perception check needed or GameStateManager not available
+        
+        // Set up the collider size (must happen after BoxCollider2D is ensured)
+        if (clueData.colliderSize != Vector2.zero)
         {
-            isInteractable = true;
+            boxCollider.size = clueData.colliderSize;
+        }
+        else if (spriteRenderer != null && spriteRenderer.sprite != null && spriteRenderer.enabled)
+        {
+            // Optional: Default collider size to sprite bounds if not specified and sprite exists
+            // This requires the sprite to be set first.
+            // For more accurate sizing, it's better to set colliderSize explicitly in ClueData.
+            boxCollider.size = spriteRenderer.bounds.size / transform.lossyScale.x; // Adjust for world scale if necessary
+            if(boxCollider.size == Vector2.zero) boxCollider.size = new Vector2(1,1); // Fallback if bounds are zero
+        }
+        else
+        {
+            boxCollider.size = new Vector2(1,1); // Default if no sprite and no size given, ensure it's clickable
+        }
+        boxCollider.isTrigger = true; // Usually good for OnMouseDown without physical collision effects
+
+        // Perform initial perception check to determine if interactable
+        isInteractable = false; // Default to not interactable
+        if (gameStateManager != null && clueData.initialPerceptionSkill != InvestigationSkillType.None && clueData.initialPerceptionDC > 0)
+        {
+            int playerSkill = gameStateManager.GetSkillLevel(clueData.initialPerceptionSkill.ToString());
+            if (playerSkill >= clueData.initialPerceptionDC)
+            {
+                isInteractable = true;
+                Debug.Log($"Clue '{clueData.clueName}' IS interactable (Perception Check: Player {clueData.initialPerceptionSkill} {playerSkill} vs DC {clueData.initialPerceptionDC}).");
+            }
+            else
+            {
+                Debug.Log($"Clue '{clueData.clueName}' is NOT interactable (Perception Check: Player {clueData.initialPerceptionSkill} {playerSkill} vs DC {clueData.initialPerceptionDC}). Hiding GameObject.");
+            }
+        }
+        else // No perception check needed (DC 0 or Skill None) or GameStateManager not available for check
+        {
+            isInteractable = true; // Default to interactable if no check is defined
             if (clueData.initialPerceptionSkill != InvestigationSkillType.None && clueData.initialPerceptionDC > 0 && gameStateManager == null)
             {
-                Debug.LogWarning($"GameStateManager not found for perception check on {clueData.clueName}. Clue will be interactable by default.");
+                Debug.LogWarning($"GameStateManager not found for perception check on '{clueData.clueName}'. Clue defaults to interactable.");
             }
         }
 
-        if (!gameObject.activeSelf && isInteractable) // Ensure it's active if it should be
+        // Set GameObject active state based on interactability (from perception)
+        // Note: InvestigationManager already sets the initial active state in SpawnClues based on perception.
+        // This internal `isInteractable` flag is primarily for governing mouse events and OnMouseDown.
+        // If the GameObject was set inactive by InvestigationManager, OnMouseEnter/Exit/Down won't fire anyway.
+        // So, the SetActive(false) here is somewhat redundant if InvestigationManager already handles it,
+        // but it ensures consistency if this Initialize method were called in a different context.
+        if (!isInteractable)
         {
-            gameObject.SetActive(true);
+            // If not interactable due to perception, InvestigationManager.SpawnClues should have already handled SetActive(false).
+            // If somehow it's still active, this ensures the internal flag matches.
+            // We don't want to call SetActive(false) here again if InvestigationManager already did,
+            // as this script won't receive OnEnable/Start if it starts inactive.
         }
     }
 
-    // This method would be called if you implement a way for player skills to update and reveal clues
+    // Called by InvestigationManager if skills update, potentially revealing this clue
     public void UpdateInteractableState()
     {
-        if (gameStateManager == null || clueData == null || gameObject.activeSelf) return; // Already active or cannot check
+        if (gameObject.activeSelf || clueData == null || gameStateManager == null) // Already active or cannot re-check
+        {
+            return;
+        }
 
+        // Re-check perception
         if (clueData.initialPerceptionSkill != InvestigationSkillType.None && clueData.initialPerceptionDC > 0)
         {
             int playerSkill = gameStateManager.GetSkillLevel(clueData.initialPerceptionSkill.ToString());
-            bool canNowSee = playerSkill >= clueData.initialPerceptionDC;
-
-            if (canNowSee)
+            if (playerSkill >= clueData.initialPerceptionDC)
             {
-                gameObject.SetActive(true);
                 isInteractable = true;
-                Debug.Log($"Clue '{clueData.clueName}' is NOW interactable after skill update.");
-                // Optional: GetComponent<SpriteRenderer>().color = Color.white; // Restore full visibility if changed
+                gameObject.SetActive(true); // Activate the clue if it passes now
+                Debug.Log($"Clue '{clueData.clueName}' became interactable after skill update.");
             }
+            // else, it remains inactive and isInteractable remains false
         }
+        // If no perception check was needed, it should have been active from the start.
     }
 
     private bool CheckPlayerSkill(InvestigationSkillType skill, int dc)
     {
         if (gameStateManager == null)
         {
-            Debug.LogWarning($"Cannot perform skill check for {skill}; GameStateManager is missing.");
-            return false; // Or true, depending on desired fallback behavior
+            Debug.LogWarning($"Cannot perform skill check for {skill}; GameStateManager is missing for clue '{clueData.clueName}'. Assuming failure.");
+            return false;
         }
         int skillValue = gameStateManager.GetSkillLevel(skill.ToString());
         return skillValue >= dc;
     }
 
-    // Using OnMouseDown requires a Collider on this GameObject and a Camera with a PhysicsRaycaster (or Physics2DRaycaster for 2D colliders)
-    // If your setup uses Unity's EventSystem more directly (e.g. for UI elements or worldspace UI),
-    // you might prefer IPointerClickHandler. For now, OnMouseDown is simpler for basic world objects.
     void OnMouseDown()
     {
-        if (!isInteractable || hasBeenInteractedWith || investigationManager == null)
+        // GameObject must be active and have a collider for OnMouseDown to work.
+        // The `isInteractable` flag here is an additional internal check.
+        if (!isInteractable || hasBeenInteractedWith || investigationManager == null || clueData == null)
         {
-            if(investigationManager == null) Debug.LogError("InvestigationManager not set on ClueInteractable!");
+            if (investigationManager == null) Debug.LogError($"InvestigationManager not set on ClueInteractable: {name}");
             return;
         }
 
         Debug.Log($"Clicked on clue: {clueData.clueName}");
-        // hasBeenInteractedWith = true; // Uncomment if clues should only be interacted with once
+        // hasBeenInteractedWith = true; // Uncomment if clues should only be fully interacted with once
 
-        // 1. Prepare description based on skill check for more info (if required)
         string descriptionToShow = clueData.baseDescription;
         if (clueData.requiresSkillCheckForMoreInfo)
         {
@@ -133,61 +164,65 @@ public class ClueInteractable : MonoBehaviour
             if (success)
             {
                 descriptionToShow = !string.IsNullOrEmpty(clueData.successDescription) ? clueData.successDescription : clueData.baseDescription;
-                Debug.Log($"Skill check SUCCESS for {clueData.clueName}: {descriptionToShow}");
+                Debug.Log($"Skill check SUCCESS for {clueData.clueName}.");
             }
             else
             {
                 descriptionToShow = !string.IsNullOrEmpty(clueData.failureDescription) ? clueData.failureDescription : clueData.baseDescription;
-                Debug.Log($"Skill check FAILED for {clueData.clueName}: {descriptionToShow}");
+                Debug.Log($"Skill check FAILED for {clueData.clueName}.");
             }
         }
 
-        // 2. Tell InvestigationManager to show the pop-up
         investigationManager.ShowClueInfoPopup(clueData, descriptionToShow);
 
-
-        // 3. Update case file/game state if it's key evidence
         if (clueData.isKeyEvidence && gameStateManager != null)
         {
             Debug.Log($"Clue '{clueData.clueName}' is key evidence.");
-            if(!string.IsNullOrEmpty(clueData.relatedCaseID) && !string.IsNullOrEmpty(clueData.caseFlagToSet))
+            if (!string.IsNullOrEmpty(clueData.relatedCaseID) && !string.IsNullOrEmpty(clueData.caseFlagToSet))
             {
                 gameStateManager.SetCaseFlag(clueData.relatedCaseID, clueData.caseFlagToSet, true);
             }
-            if(!string.IsNullOrEmpty(clueData.relatedCaseID) && !string.IsNullOrEmpty(clueData.relatedObjectiveID))
+            if (!string.IsNullOrEmpty(clueData.relatedCaseID) && !string.IsNullOrEmpty(clueData.relatedObjectiveID))
             {
-                // Assuming a method like this exists or will be created in GameStateManager
-                // gameStateManager.CompleteObjective(clueData.relatedCaseID, clueData.relatedObjectiveID);
-                 Debug.Log($"Objective completion for {clueData.relatedObjectiveID} in case {clueData.relatedCaseID} needs to be handled by GameStateManager.");
+                gameStateManager.CompleteCaseObjective(clueData.relatedCaseID, clueData.relatedObjectiveID);
+                Debug.Log($"Objective '{clueData.relatedObjectiveID}' in case '{clueData.relatedCaseID}' marked for completion.");
             }
         }
-
-        // Potentially make non-interactable after first interaction, or change sprite, etc.
-        // isInteractable = false;
-        // SpriteRenderer sr = GetComponent<SpriteRenderer>();
-        // if (sr != null) sr.color = Color.gray; // Example: grey out after interaction
+        
+        // Optional: if a clue can only be "processed" once for its main effect
+        // if (!clueData.allowMultipleInteractions) // Assuming ClueData has such a field
+        // {
+        //    hasBeenInteractedWith = true;
+        //    // Potentially change sprite or disable further detailed interaction
+        // }
     }
 
     void OnMouseEnter()
     {
-        if (isInteractable)
+        // Only change cursor if the clue is active, interactable, and not already "used up" (if that's a mechanic)
+        // Note: If the GameObject is inactive (due to failing perception check), OnMouseEnter won't fire.
+        // The `isInteractable` flag confirms it passed its perception check *and* is generally interactable.
+        if (isInteractable && !hasBeenInteractedWith && CursorManager.Instance != null)
         {
-            // Optional: Highlight or change cursor
-            // transform.localScale *= 1.1f; // Example hover effect
-            if (investigationManager != null)
-            {
-                // investigationManager.ShowMouseTooltip($"Inspect {clueData.clueName}");
-            }
+            CursorManager.Instance.SetCursorToInteract();
         }
+        // Optional: Add visual highlighting for the clue itself
+        // if (isInteractable && !hasBeenInteractedWith && spriteRenderer != null && spriteRenderer.enabled)
+        // {
+        //     spriteRenderer.color = Color.yellow; // Example highlight
+        // }
     }
 
     void OnMouseExit()
     {
-        // Optional: Remove highlight or reset cursor
-        // transform.localScale /= 1.1f; // Reset hover effect
-        if (investigationManager != null)
+        if (CursorManager.Instance != null)
         {
-           // investigationManager.HideMouseTooltip();
+            CursorManager.Instance.SetCursorToNormal();
         }
+        // Optional: Remove visual highlighting
+        // if (spriteRenderer != null && spriteRenderer.enabled)
+        // {
+        //     spriteRenderer.color = Color.white; // Reset to default color
+        // }
     }
 }
