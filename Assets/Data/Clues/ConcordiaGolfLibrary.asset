@@ -1,0 +1,36 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e8fda7d39ee2c114ab95faff2771e68f, type: 3}
+  m_Name: ConcordiaGolfLibrary
+  m_EditorClassIdentifier: 
+  clueID: ConcordiaGolfLibrary
+  clueName: Concordia Golf Club Card
+  initialPerceptionSkill: 1
+  initialPerceptionDC: 0
+  clueWorldSprite: {fileID: 21300000, guid: 4e76a27b33fdefa41a00958b2d41f41c, type: 3}
+  worldPosition: {x: 600, y: -450}
+  visualScale: {x: 4, y: 4}
+  colliderSize: {x: 10, y: 10}
+  baseDescription: "Interesting. Someone dropped a membership card for the Concordia
+    Golf Club. Emile Laurence.  Could be dropped at any point, but you\u2019d think
+    someone would be cleaning up. But then again, it did sound like the library is
+    understaffed..."
+  cluePopupImage: {fileID: 21300000, guid: 4e76a27b33fdefa41a00958b2d41f41c, type: 3}
+  requiresSkillCheckForMoreInfo: 0
+  skillCheckType: 0
+  skillCheckDC: 0
+  successDescription: 
+  failureDescription: 
+  isKeyEvidence: 0
+  relatedCaseID: 
+  relatedObjectiveID: 
+  caseFlagToSet: 

@@ -26,12 +26,20 @@ public class ClueData : ScriptableObject
     public InvestigationSkillType initialPerceptionSkill = InvestigationSkillType.Perception;
     [Tooltip("DC for the initialPerceptionSkill to make the clue interactable. 0 if no check needed or if skill is 'None'.")]
     public int initialPerceptionDC = 0;
-    public Sprite clueWorldSprite; // Optional: If the clue is a physical object in the scene (like the golf card). Leave null if it's part of the background.
-    public Vector2 worldPosition; // If it's a placed sprite, its position in the investigation scene.
-    public Vector2 colliderSize = new Vector2(1,1); // Size of the clickable area for this clue.
+    [Tooltip("Optional: If the clue is a physical object in the scene (like the golf card). Leave null if it's part of the background.")]
+    public Sprite clueWorldSprite;
+    [Tooltip("If it's a placed sprite, its position in the investigation scene.")]
+    public Vector2 worldPosition;
+    
+    [Tooltip("Visual scale of the clue's GameObject when spawned. Default is (1,1), affecting transform.localScale.")]
+    public Vector2 visualScale = Vector2.one; // <-- THE ADDED FIELD FOR VISUAL SCALING
+
+    [Tooltip("Size of the clickable area for this clue.")]
+    public Vector2 colliderSize = new Vector2(1,1); // Default to (1,1) - adjust as needed
 
     [Header("Interaction & Information")]
     [Tooltip("Text shown if the player fails the 'Skill Check for More Info' (if applicable), or the default/only text if no further skill check is needed.")]
+    [TextArea(3,5)] // Added TextArea for consistency with other descriptions
     public string baseDescription;
     [Tooltip("Optional: Image to show in the information pop-up when this clue is inspected.")]
     public Sprite cluePopupImage;

@@ -1,7 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using TMPro;
-using System.Collections; // Ensure this is here for IEnumerator
+using System.Collections;
 using System.Collections.Generic;
 
 public class InvestigationManager : MonoBehaviour
@@ -19,6 +19,14 @@ public class InvestigationManager : MonoBehaviour
 
     [Tooltip("Drag an empty GameObject here to act as a parent for instantiated character visuals.")]
     public Transform charactersParent;
+
+    [Header("Prefabs")]
+    [Tooltip("Prefab that has the ClueInteractable script attached.")]
+    public GameObject cluePrefab; // For spawning clues with ClueInteractable.cs
+
+    [Tooltip("Prefab that has the InteractiveObject script attached, used for characters (or a generic interactable).")]
+    public GameObject characterInteractiveObjectPrefab; // Kept for character spawning logic
+
 
     [Header("Police Timer UI")]
     [Tooltip("Drag a TextMeshProUGUI component here to display the police timer value (e.g., 02:00).")]
@@ -72,9 +80,9 @@ public class InvestigationManager : MonoBehaviour
 
     // Internal State
     private float currentPoliceTimerValue;
-    private float totalPoliceTimerDuration; // Store the initial calculated total duration
+    private float totalPoliceTimerDuration;
     private bool isTimerPaused = false;
-    private List<GameObject> spawnedClueObjects = new List<GameObject>();
+    private List<ClueInteractable> activeCluesInScene = new List<ClueInteractable>();
     private List<GameObject> spawnedCharacterObjects = new List<GameObject>();
     private List<GameObject> spawnedWitnessPopups = new List<GameObject>();
     private Coroutine characterThoughtCoroutine;
@@ -96,13 +104,19 @@ public class InvestigationManager : MonoBehaviour
 
         if (currentSceneData == null)
         {
-            Debug.LogError("InvestigationManager: No InvestigationSceneData assigned or passed! Please assign one in the Inspector if testing this scene directly.");
+            Debug.LogError("InvestigationManager: No InvestigationSceneData assigned or passed via GameStateManager! Please assign one in the Inspector if testing this scene directly.");
             enabled = false;
             return;
         }
 
         InitializeScene();
         InitializeUI();
+
+        if (GameStateManager.Instance != null)
+        {
+            GameStateManager.Instance.OnGameStateChanged.RemoveListener(HandleGameStateChanged);
+            GameStateManager.Instance.OnGameStateChanged.AddListener(HandleGameStateChanged);
+        }
     }
 
     void Update()
@@ -117,9 +131,6 @@ public class InvestigationManager : MonoBehaviour
         if (backgroundImageUI != null && currentSceneData != null && currentSceneData.backgroundImage != null)
         {
             backgroundImageUI.sprite = currentSceneData.backgroundImage;
-            // Consider adding AspectRatioFitter to the backgroundImageUI GameObject for better results
-            // For now, Preserve Aspect is handled by the Image component's own setting
-            // backgroundImageUI.preserveAspect = true; // Ensure this is ticked on your Image component or set here
         }
         else
         {
@@ -129,10 +140,10 @@ public class InvestigationManager : MonoBehaviour
         }
 
         ClearSpawnedObjects();
-        SpawnClues();
+        SpawnClues(); 
         SpawnCharacters();
         SpawnWitnessPopups();
-        SetupPoliceTimer(); // Call this after everything else in InitializeScene is ready
+        SetupPoliceTimer();
 
         if (currentSceneData != null && !string.IsNullOrEmpty(currentSceneData.entryCharacterThought))
         {
@@ -156,32 +167,88 @@ public class InvestigationManager : MonoBehaviour
 
         if (skillCheckStaticText != null)
         {
-            skillCheckStaticText.text = "Skill Required"; // Set default static text
+            skillCheckStaticText.text = "Skill Required";
         }
         
-        // Set initial timer text color
         if (policeTimerText != null) policeTimerText.color = policeTimerNormalColor;
     }
 
     void SpawnClues()
     {
-        if (currentSceneData == null || currentSceneData.cluesInScene == null || cluesParent == null) return;
+        if (currentSceneData == null || currentSceneData.cluesInScene == null)
+        {
+            Debug.LogWarning("InvestigationManager: No scene data or cluesInScene to spawn.");
+            return;
+        }
+
+        if (cluePrefab == null)
+        {
+            Debug.LogError("InvestigationManager: Clue Prefab not assigned in the Inspector!");
+            return;
+        }
+        
+        Transform parentToUse = cluesParent != null ? cluesParent : transform;
+
+        Debug.Log($"Spawning {currentSceneData.cluesInScene.Count} clues for scene '{currentSceneData.name}'.");
         foreach (ClueData clueData in currentSceneData.cluesInScene)
         {
-            if (clueData == null) continue;
-            Debug.Log("Spawning Clue (Placeholder): " + clueData.clueName);
-            // TODO: Actual clue spawning logic
+            if (clueData == null)
+            {
+                Debug.LogWarning("Encountered a null ClueData in cluesInScene list.");
+                continue;
+            }
+
+            GameObject clueObjectInstance = Instantiate(cluePrefab, parentToUse);
+            clueObjectInstance.name = $"Clue_{(!string.IsNullOrEmpty(clueData.clueID) ? clueData.clueID : clueData.clueName)}";
+            
+            clueObjectInstance.transform.localPosition = clueData.worldPosition;
+            // Apply individual visual scale from ClueData
+            clueObjectInstance.transform.localScale = new Vector3(clueData.visualScale.x, clueData.visualScale.y, 1f);
+
+            ClueInteractable clueScript = clueObjectInstance.GetComponent<ClueInteractable>();
+            if (clueScript != null)
+            {
+                clueScript.Initialize(clueData, this, GameStateManager.Instance);
+                activeCluesInScene.Add(clueScript);
+            }
+            else
+            {
+                Debug.LogError($"Clue Prefab '{cluePrefab.name}' is missing the ClueInteractable script for clue: {clueData.clueName}. Destroying instance.");
+                Destroy(clueObjectInstance);
+            }
         }
+        Debug.Log("Clue spawning complete. Spawned " + activeCluesInScene.Count + " clues.");
     }
 
     void SpawnCharacters()
     {
-        if (currentSceneData == null || currentSceneData.charactersInScene == null || charactersParent == null) return;
+        if (currentSceneData == null || currentSceneData.charactersInScene == null) return;
+        Transform parentToUse = charactersParent != null ? charactersParent : transform;
+
+        if (characterInteractiveObjectPrefab == null) {
+            // Debug.LogWarning("Character Interactive Object Prefab not assigned. Cannot spawn characters.");
+            return;
+        }
+
         foreach (CharacterPlacementData charPlacement in currentSceneData.charactersInScene)
         {
             if (charPlacement == null || charPlacement.characterProfile == null) continue;
             Debug.Log("Spawning Character (Placeholder): " + charPlacement.characterProfile.displayName);
-            // TODO: Actual character spawning logic
+            // Example if using InteractiveObject.cs for characters:
+            // GameObject charInstance = Instantiate(characterInteractiveObjectPrefab, parentToUse);
+            // charInstance.name = "Character_" + charPlacement.characterProfile.characterID;
+            // charInstance.transform.localPosition = charPlacement.scenePosition; 
+            // // If characters also need individual scaling, add a scale field to CharacterPlacementData
+            // // charInstance.transform.localScale = new Vector3(charPlacement.visualScale.x, charPlacement.visualScale.y, 1f);
+            // InteractiveObject charScript = charInstance.GetComponent<InteractiveObject>();
+            // if (charScript != null)
+            // {
+            //    charScript.InitializeAsCharacter(charPlacement, this);
+            //    spawnedCharacterObjects.Add(charInstance);
+            // } else {
+            //    Debug.LogError($"Character prefab {characterInteractiveObjectPrefab.name} missing InteractiveObject script for {charPlacement.characterProfile.displayName}");
+            //    Destroy(charInstance);
+            // }
         }
     }
 
@@ -200,40 +267,38 @@ public class InvestigationManager : MonoBehaviour
     {
         if (currentSceneData == null || GameStateManager.Instance == null) {
             Debug.LogError("Cannot setup police timer - currentSceneData or GameStateManager.Instance is missing.");
+            if (policeTimerText != null) policeTimerText.text = "ERR";
+            if (policeTimerBar != null) policeTimerBar.gameObject.SetActive(false);
             enabled = false; 
             return;
         }
 
-        float baseTime = currentSceneData.basePoliceTimerSeconds;
+        float baseTime = currentSceneData.basePoliceTimerSeconds; 
         float reputationModifier = GameStateManager.Instance.PoliceReputationModifier;
         
-        totalPoliceTimerDuration = baseTime * (1 + reputationModifier);
-        totalPoliceTimerDuration = Mathf.Max(0.1f, totalPoliceTimerDuration); // Ensure total duration is not effectively zero
+        totalPoliceTimerDuration = baseTime * (1f + reputationModifier);
+        totalPoliceTimerDuration = Mathf.Max(0.1f, totalPoliceTimerDuration); 
         
-        currentPoliceTimerValue = totalPoliceTimerDuration; // Start timer full
+        currentPoliceTimerValue = totalPoliceTimerDuration;
         
-        UpdatePoliceTimerUI(); // Initial UI update based on full time
+        UpdatePoliceTimerUI();
+        PauseTimer(false); 
         Debug.Log($"Police timer initiated: CurrentValue={currentPoliceTimerValue}, TotalDuration={totalPoliceTimerDuration} seconds (Base: {baseTime}, RepMod: {reputationModifier})");
     }
 
     void HandlePoliceTimer()
     {
-        if (isTimerPaused) return;
+        if (isTimerPaused || currentPoliceTimerValue <= 0) return;
 
-        if (currentPoliceTimerValue > 0)
+        currentPoliceTimerValue -= Time.deltaTime;
+        if (currentPoliceTimerValue <= 0)
         {
-            currentPoliceTimerValue -= Time.deltaTime;
-            if (currentPoliceTimerValue <= 0)
-            {
-                currentPoliceTimerValue = 0; // Clamp to exactly zero
-                UpdatePoliceTimerUI();       // Update UI to show "00:00"
-                OnPoliceTimerEnd();          // Trigger end-of-timer logic
-                return;                      // Stop further processing for this frame
-            }
+            currentPoliceTimerValue = 0;
+            UpdatePoliceTimerUI();
+            OnPoliceTimerEnd();
+            return; 
         }
-        // If timer is already at or below zero (should be exactly zero due to above),
-        // ensure UI reflects this, especially if paused/resumed at zero.
-        UpdatePoliceTimerUI();
+        UpdatePoliceTimerUI(); 
     }
 
     void UpdatePoliceTimerUI()
@@ -252,8 +317,8 @@ public class InvestigationManager : MonoBehaviour
                 if (percentageRemaining <= criticalThreshold)       { policeTimerText.color = policeTimerCriticalColor; }
                 else if (percentageRemaining <= warningThreshold)  { policeTimerText.color = policeTimerWarningColor; }
                 else                                               { policeTimerText.color = policeTimerNormalColor; }
-            } else {
-                policeTimerText.color = policeTimerNormalColor;
+            } else { 
+                policeTimerText.color = (displayValue <=0) ? policeTimerCriticalColor : policeTimerNormalColor;
             }
         }
 
@@ -265,34 +330,22 @@ public class InvestigationManager : MonoBehaviour
             }
             else
             {
-                policeTimerBar.value = (displayValue > 0f) ? 1f : 0f;
+                policeTimerBar.value = (displayValue > 0f && totalPoliceTimerDuration > 0.0001f) ? 1f : 0f;
             }
         }
     }
 
     void OnPoliceTimerEnd()
     {
-        if (isTimerPaused && currentPoliceTimerValue <= 0) return; // Already handled
-
         Debug.Log("Police Timer Ended! Player must leave.");
-        currentPoliceTimerValue = 0; 
-        PauseTimer(true);      // Sets isTimerPaused = true
-        UpdatePoliceTimerUI(); // Final UI update after pausing and setting time to 0
+        PauseTimer(true); 
 
-        DisplayCharacterThought("The cops are here! I gotta bail!");
-        // Example for future: StartCoroutine(DelayedSceneSwitch(GameStateManager.GameState.Map, 2.0f));
+        DisplayCharacterThought("The cops are here! I gotta bail!", 5f);
     }
-
-    // IEnumerator DelayedSceneSwitch(GameStateManager.GameState state, float delay)
-    // {
-    //    yield return new WaitForSeconds(delay);
-    //    GameStateManager.Instance.SwitchState(state, null);
-    // }
 
     public void PauseTimer(bool pause)
     {
         isTimerPaused = pause;
-        // Debug.Log("Police Timer " + (pause ? "Paused" : "Resumed")); // Optional: for debugging pause state
     }
 
     public void DisplayCharacterThought(string thoughtText, float duration = 3f)
@@ -306,36 +359,52 @@ public class InvestigationManager : MonoBehaviour
         characterThoughtCoroutine = StartCoroutine(ShowThoughtCoroutine(thoughtText, duration));
     }
 
-    private System.Collections.IEnumerator ShowThoughtCoroutine(string thoughtText, float duration)
+    private IEnumerator ShowThoughtCoroutine(string thoughtText, float duration)
     {
         if (characterThoughtText == null || characterThoughtBubblePanel == null)
         {
             Debug.LogError("Character thought UI elements not assigned within coroutine start!");
-            PauseTimer(false); 
+            if (currentPoliceTimerValue > 0) PauseTimer(false);  
             yield break; 
         }
         characterThoughtText.text = thoughtText;
         characterThoughtBubblePanel.SetActive(true);
+        bool originalTimerState = isTimerPaused;
         PauseTimer(true);
+
         Debug.Log("Character Thought Displayed: " + thoughtText);
         float elapsedTime = 0f;
         bool dismissedByClick = false;
+        
         while(elapsedTime < duration)
         {
-            if (Input.GetMouseButtonDown(0)) { dismissedByClick = true; break; }
-            elapsedTime += Time.deltaTime;
+            if (Input.GetMouseButtonDown(0) || Input.anyKeyDown) 
+            { 
+                dismissedByClick = true; 
+                break; 
+            }
+            elapsedTime += Time.unscaledDeltaTime; 
             yield return null; 
         }
-        if (dismissedByClick) Debug.Log("Character thought dismissed by click.");
+
+        if (dismissedByClick) Debug.Log("Character thought dismissed by input.");
         else Debug.Log("Character thought timed out.");
+        
         characterThoughtBubblePanel.SetActive(false);
-        PauseTimer(false);
+        if (!originalTimerState && currentPoliceTimerValue > 0) 
+        {
+            PauseTimer(false);
+        }
         characterThoughtCoroutine = null;
     }
 
     public void ShowClueInfoPopup(ClueData clueData, string descriptionToShow)
     {
-        if (clueInfoPopupPanel == null || clueData == null) return;
+        if (clueInfoPopupPanel == null || clueData == null) 
+        {
+            Debug.LogError("Cannot show clue info: Panel or ClueData is null.");
+            return;
+        }
         PauseTimer(true);
         clueInfoPopupPanel.SetActive(true);
         if (cluePopupNameText != null) cluePopupNameText.text = clueData.clueName;
@@ -347,17 +416,20 @@ public class InvestigationManager : MonoBehaviour
         }
     }
 
-    void CloseClueInfoPopup()
+    void CloseClueInfoPopup() 
     {
         if (clueInfoPopupPanel != null) clueInfoPopupPanel.SetActive(false);
-        PauseTimer(false);
+        if (currentPoliceTimerValue > 0) 
+        {
+            PauseTimer(false);
+        }
     }
 
     public void ShowSkillCheckUI(ClueData forClue, bool checkSucceeded)
     {
         if (skillCheckDisplayPanel == null || forClue == null || !forClue.requiresSkillCheckForMoreInfo)
         {
-            if(skillCheckDisplayPanel != null) skillCheckDisplayPanel.SetActive(false);
+            if(skillCheckDisplayPanel != null) skillCheckDisplayPanel.SetActive(false); 
             return;
         }
         skillCheckDisplayPanel.SetActive(true);
@@ -371,29 +443,55 @@ public class InvestigationManager : MonoBehaviour
     {
         if (skillCheckDisplayPanel != null) skillCheckDisplayPanel.SetActive(false);
     }
+    
+    public void UpdateCluePerceptionChecks()
+    {
+        if (GameStateManager.Instance == null)
+        {
+            Debug.LogWarning("Cannot update clue perception checks; GameStateManager is missing.");
+            return;
+        }
+
+        foreach (ClueInteractable clueScript in activeCluesInScene)
+        {
+            if (clueScript != null && !clueScript.gameObject.activeSelf) 
+            {
+                clueScript.UpdateInteractableState(); 
+            }
+        }
+    }
 
     void ClearSpawnedObjects()
     {
-        foreach (GameObject obj in spawnedClueObjects) if (obj != null) Destroy(obj);
-        spawnedClueObjects.Clear();
+        foreach (ClueInteractable clueScript in activeCluesInScene) 
+        {
+            if (clueScript != null) Destroy(clueScript.gameObject);
+        }
+        activeCluesInScene.Clear();
+
         foreach (GameObject obj in spawnedCharacterObjects) if (obj != null) Destroy(obj);
         spawnedCharacterObjects.Clear();
+        
         foreach (GameObject obj in spawnedWitnessPopups) if (obj != null) Destroy(obj);
         spawnedWitnessPopups.Clear();
+        Debug.Log("All spawned objects cleared.");
     }
 
     public void OnReturnedFromDialogue(object dialogueOutcomeData)
     {
         Debug.Log("InvestigationManager: Returned from Dialogue.");
-        PauseTimer(false);
-        // TODO: Process dialogueOutcomeData
+        if (currentPoliceTimerValue > 0) 
+        {
+             PauseTimer(false);
+        }
     }
 
-    void OnEnable()
+    void OnEnable() 
     {
         if (GameStateManager.Instance != null)
         {
-            GameStateManager.Instance.OnGameStateChanged += HandleGameStateChanged;
+            GameStateManager.Instance.OnGameStateChanged.RemoveListener(HandleGameStateChanged);
+            GameStateManager.Instance.OnGameStateChanged.AddListener(HandleGameStateChanged);
         }
     }
 
@@ -401,39 +499,71 @@ public class InvestigationManager : MonoBehaviour
     {
         if (GameStateManager.Instance != null)
         {
-            GameStateManager.Instance.OnGameStateChanged -= HandleGameStateChanged;
+            GameStateManager.Instance.OnGameStateChanged.RemoveListener(HandleGameStateChanged);
+        }
+        if (characterThoughtCoroutine != null)
+        {
+            StopCoroutine(characterThoughtCoroutine);
+            characterThoughtCoroutine = null;
+        }
+    }
+
+    void OnDestroy() 
+    {
+         if (GameStateManager.Instance != null)
+        {
+            // Corrected the typo here
+            GameStateManager.Instance.OnGameStateChanged.RemoveListener(HandleGameStateChanged); 
         }
         ClearSpawnedObjects();
     }
 
     private void HandleGameStateChanged(GameStateManager.GameState newState, object data)
     {
-        if (this == null || !gameObject.activeInHierarchy) return;
+        if (this == null || !gameObject.activeInHierarchy || !enabled) return;
+
         if (newState == GameStateManager.GameState.Investigation)
         {
             Debug.Log("InvestigationManager: HandleGameStateChanged - Investigation state is active.");
             InvestigationSceneData dataFromState = data as InvestigationSceneData;
-            if (dataFromState != null && currentSceneData != dataFromState)
+
+            if (dataFromState != null && (currentSceneData == null || currentSceneData.name != dataFromState.name)) 
             {
                 currentSceneData = dataFromState;
-                InitializeScene();
+                InitializeScene(); 
+                InitializeUI();    
             }
-            else if (data != null && !(data is InvestigationSceneData))
+            else if (dataFromState != null && currentSceneData == dataFromState) 
+            {
+                 Debug.Log("InvestigationManager: Returning to current investigation scene: " + currentSceneData.name);
+                 if (clueInfoPopupPanel != null && clueInfoPopupPanel.activeSelf) CloseClueInfoPopup();
+                 if (characterThoughtBubblePanel != null && characterThoughtBubblePanel.activeSelf) characterThoughtBubblePanel.SetActive(false);
+                 if (currentPoliceTimerValue > 0) PauseTimer(false);
+            }
+            else if (data != null && !(data is InvestigationSceneData)) 
             {
                 OnReturnedFromDialogue(data);
             }
-            else if (data == null && currentSceneData == null) { // Scene loaded directly, no data from GSM, nothing in Inspector
+            else if (data == null && currentSceneData == null) 
+            {
                 Debug.LogError("Investigation scene loaded but no InvestigationSceneData available! Please assign one in Inspector or ensure GameStateManager passes it.");
                 enabled = false; 
             }
-             else if (data == null && currentSceneData != null) { // Scene loaded directly (currentSceneData from Inspector) or returning to it
-                 PauseTimer(false); // Ensure timer is running if we are in the scene
+            else if (data == null && currentSceneData != null) 
+            {
+                 if (currentPoliceTimerValue > 0) PauseTimer(false);
             }
         }
-        else
+        else 
         {
-            // We are leaving the investigation state
             PauseTimer(true);
+            if (clueInfoPopupPanel != null && clueInfoPopupPanel.activeSelf) CloseClueInfoPopup(); 
+            if (skillCheckDisplayPanel != null && skillCheckDisplayPanel.activeSelf) HideSkillCheckUI();
+            if (characterThoughtBubblePanel != null && characterThoughtCoroutine != null) {
+                StopCoroutine(characterThoughtCoroutine);
+                characterThoughtCoroutine = null;
+                characterThoughtBubblePanel.SetActive(false);
+            }
         }
     }
 }

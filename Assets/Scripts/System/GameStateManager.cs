@@ -1,230 +1,180 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using System.Collections.Generic;
-using System; // Added for Action delegate
+using UnityEngine.Events; // Required for UnityEvent
 
-/// <summary>
-/// Manages the overall game state, including player progression,
-/// skills, flags, case data, and handles transitions between game scenes/states.
-/// This should be a Singleton and persist across scene loads.
-/// </summary>
 public class GameStateManager : MonoBehaviour
 {
-    public static GameStateManager Instance { get; private set; }
+    // Singleton instance
+    private static GameStateManager _instance;
+    public static GameStateManager Instance
+    {
+        get
+        {
+            if (_instance == null)
+            {
+                _instance = FindObjectOfType<GameStateManager>();
+                if (_instance == null)
+                {
+                    GameObject singletonObject = new GameObject("GameStateManager_Singleton");
+                    _instance = singletonObject.AddComponent<GameStateManager>();
+                    Debug.Log("GameStateManager instance created.");
+                }
+            }
+            return _instance;
+        }
+    }
 
     public enum GameState
     {
-        MainMenu, // Assuming you might have a main menu
+        MainMenu,
         Map,
         Investigation,
         Dialogue,
-        Casing // For the Casing System
-        // Add other states like Combat, PauseMenu etc. as needed
+        Casing
     }
 
-    public GameState CurrentState { get; private set; }
-    private object _currentStateData; // To pass specific data to the new state
+    [Header("Current State")]
+    [SerializeField]
+    private GameState currentGameState = GameState.MainMenu;
+    public GameState CurrentGameState => currentGameState;
 
-    // Event to notify other systems when the game state changes
-    public event Action<GameState, object> OnGameStateChanged;
+    [System.Serializable]
+    public class GameStateChangedEvent : UnityEvent<GameState, object> { }
+    public GameStateChangedEvent OnGameStateChanged = new GameStateChangedEvent();
 
-    // --- Core Game Data (from your dialogue prototype's GameStateManager) ---
-    public Dictionary<string, int> PlayerSkills = new Dictionary<string, int>();
-    public string PlayerBackground = "Default"; // Example: "StreetKid", "Detective", "Mystic"
-    public HashSet<string> VisitedNodeIds = new HashSet<string>();
-    public Dictionary<string, bool> GlobalFlags = new Dictionary<string, bool>();
-    public Dictionary<string, string> CaseStatuses = new Dictionary<string, string>(); // e.g., <caseId, "NotStarted" / "Active" / "Completed" / "Failed">
-    public Dictionary<string, HashSet<string>> CompletedCaseObjectives = new Dictionary<string, HashSet<string>>();
-    public Dictionary<string, Dictionary<string, bool>> CaseFlags = new Dictionary<string, Dictionary<string, bool>>(); // For case-specific flags
+    [Header("Scene Configuration")]
+    public string mainMenuSceneName = "MainMenuScene";
+    public string mapSceneName = "MapScene";
+    public string investigationSceneName = "InvestigationScene";
+    public string dialogueSceneName = "DialogueScene";
+    public string casingSceneName = "CasingScene";
 
-    // --- Investigation Specific Data (Can be expanded) ---
-    // Example: -0.25f for Negative Rank 1, 0.25f for Positive Rank 1
-    // This will be used to modify the base police timer in investigation scenes.
-    public float PoliceReputationModifier = 0f;
+    [Header("Player Profile & Progress")]
+    public string playerBackground = "Default";
+    [Range(-1f, 1f)]
+    public float policeReputationModifier = 0f;
+    public float PoliceReputationModifier => policeReputationModifier;
 
-    // --- Scene Name Configuration (Makes it easier to manage scene names) ---
-    public string MainMenuSceneName = "MainMenuScene"; // Example scene name
-    public string MapSceneName = "MapScene";
-    public string InvestigationSceneName = "InvestigationScene";
-    public string DialogueSceneName = "DialogueScene";
-    public string CasingSceneName = "CasingScene"; // Example scene name for Casing System
+    // --- DEBUG: Temporary Skill Overrides for Testing ---
+    [Header("Debug Skill Overrides (For Testing)")]
+    public int debugPerception = 30;
+    public int debugLockpicking = 15;
+    public int debugIntimidation = 20;
+    public int debugPersuasion = 25;
+    public int debugStreetwise = 10;
+    // --- End Debug Skill Overrides ---
 
-    void Awake()
+    public Dictionary<string, int> PlayerSkills { get; private set; } = new Dictionary<string, int>();
+    public Dictionary<string, Dictionary<string, object>> CaseProgress { get; private set; } = new Dictionary<string, Dictionary<string, object>>();
+    private object currentStateData = null;
+
+    // ---- Fields from old GameStateManager (from dialogue prototype) ----
+    public HashSet<string> VisitedNodeIds { get; private set; } = new HashSet<string>();
+    public Dictionary<string, bool> GlobalFlags { get; private set; } = new Dictionary<string, bool>();
+    // CaseStatuses, CompletedCaseObjectives, CaseFlags are now part of CaseProgress or can be integrated if needed differently
+    // For simplicity, I'm assuming CaseProgress will hold most case-specific data.
+    // If you need the exact structure from your old GSM for these, we can add them back.
+
+    protected virtual void Awake()
     {
-        if (Instance != null && Instance != this)
+        if (_instance == null)
         {
-            Debug.LogWarning("Another instance of GameStateManager detected. Destroying this new one.");
+            _instance = this;
+            DontDestroyOnLoad(gameObject);
+            InitializeDefaultState();
+            Debug.Log("GameStateManager Awake: Instance set and marked DontDestroyOnLoad.");
+        }
+        else if (_instance != this)
+        {
+            Debug.LogWarning("GameStateManager Awake: Another instance already exists. Destroying this one.");
             Destroy(gameObject);
-        }
-        else
-        {
-            Instance = this;
-            DontDestroyOnLoad(gameObject); // Make this object persist across scene loads
-            InitializeDefaultState(); // Initialize or load game data
-            Debug.Log("GameStateManager Initialized and Persisting.");
-        }
-    }
-
-    void InitializeDefaultState()
-    {
-        // Clear and set up default values. In a real game, you'd load saved data here if it exists.
-        PlayerSkills.Clear();
-        VisitedNodeIds.Clear();
-        GlobalFlags.Clear();
-        CaseStatuses.Clear();
-        CompletedCaseObjectives.Clear();
-        CaseFlags.Clear();
-        PlayerBackground = "Default";
-        PoliceReputationModifier = 0f;
-
-        // --- Example Starting Player Skills (Customize as needed) ---
-        PlayerSkills.Add("Perception", 30);
-        PlayerSkills.Add("Lockpicking", 15);
-        PlayerSkills.Add("Persuasion", 25);
-        PlayerSkills.Add("Intimidation", 20);
-        PlayerSkills.Add("Streetwise", 20);
-        // Add any other skills your game will use
-
-        Debug.Log("Default Game State Initialized (Skills, Flags, Cases reset).");
-    }
-
-    /// <summary>
-    /// Switches the game to a new state and loads the appropriate scene.
-    /// </summary>
-    /// <param name="newState">The state to switch to.</param>
-    /// <param name="dataToPass">Optional data to pass to the new state (e.g., InvestigationSceneData, DialogueData).</param>
-    public void SwitchState(GameState newState, object dataToPass = null)
-    {
-        if (CurrentState == newState && _currentStateData == dataToPass && SceneManager.GetActiveScene().name == GetSceneNameForState(newState))
-        {
-            Debug.LogWarning($"Attempting to switch to the same state ({newState}) with the same data and scene already loaded. Aborting switch.");
             return;
         }
+    }
 
-        Debug.Log($"Switching from state: {CurrentState} to state: {newState}");
-        CurrentState = newState;
-        _currentStateData = dataToPass; // Store the data for the new state
+    public virtual void InitializeDefaultState()
+    {
+        Debug.Log("GameStateManager: Initializing Default State using debug values if set.");
+        PlayerSkills.Clear();
+        PlayerSkills.Add("Perception", debugPerception);
+        PlayerSkills.Add("Lockpicking", debugLockpicking);
+        PlayerSkills.Add("Intimidation", debugIntimidation);
+        PlayerSkills.Add("Persuasion", debugPersuasion);
+        PlayerSkills.Add("Streetwise", debugStreetwise);
+        // Add other default skills or use debug overrides as needed
 
-        OnGameStateChanged?.Invoke(newState, _currentStateData); // Notify listeners
+        CaseProgress.Clear();
+        VisitedNodeIds.Clear();
+        GlobalFlags.Clear();
+        playerBackground = "Default"; // Reset or load
+        policeReputationModifier = 0f; // Reset or load
+    }
+
+    public void SwitchState(GameState newState, object dataToPass = null)
+    {
+        if (currentGameState == newState && currentStateData == dataToPass && SceneManager.GetActiveScene().name == GetSceneNameForState(newState))
+        {
+             Debug.Log($"GameStateManager: Already in state {newState} with the same data and scene. Re-invoking OnGameStateChanged for potential re-initialization.");
+             OnGameStateChanged.Invoke(newState, dataToPass); // Allow re-trigger for re-initialization
+             return;
+        }
+
+        Debug.Log($"GameStateManager: Switching from {currentGameState} to {newState}.");
+        currentGameState = newState;
+        currentStateData = dataToPass;
 
         string sceneToLoad = GetSceneNameForState(newState);
 
         if (!string.IsNullOrEmpty(sceneToLoad))
         {
-            if (SceneManager.GetActiveScene().name != sceneToLoad)
-            {
-                SceneManager.LoadScene(sceneToLoad);
-                Debug.Log($"Loaded scene: {sceneToLoad} for state: {newState}");
-            }
-            else
-            {
-                Debug.Log($"Scene {sceneToLoad} is already active. Not reloading, but state logic will proceed.");
-            }
+            // Load the scene and then invoke the event.
+            // Listeners in the new scene (if they subscribe in Awake) should generally be ready by the time the event fires
+            // if the event is invoked *after* LoadScene is called and the scene is loaded.
+            // For more complex scenarios or immediate reaction, consider a loading screen or a two-step event process.
+            SceneManager.LoadScene(sceneToLoad);
+            // It's often better to let systems in the newly loaded scene react in their Start/Awake by checking GameStateManager.Instance.CurrentGameState
+            // and GameStateManager.Instance.GetCurrentStateData().
+            // However, invoking it here allows persistent managers to react immediately.
+            OnGameStateChanged.Invoke(newState, dataToPass);
         }
         else
         {
-            Debug.LogError($"No scene defined for state: {newState}");
+            Debug.LogWarning($"GameStateManager: No scene configured for state {newState}. State changed but no scene loaded.");
+            OnGameStateChanged.Invoke(newState, dataToPass);
         }
     }
 
-    /// <summary>
-    /// Gets the scene name associated with a game state.
-    /// </summary>
-    private string GetSceneNameForState(GameState state)
+    public string GetSceneNameForState(GameState state)
     {
         switch (state)
         {
-            case GameState.MainMenu:
-                return MainMenuSceneName;
-            case GameState.Map:
-                return MapSceneName;
-            case GameState.Investigation:
-                return InvestigationSceneName;
-            case GameState.Dialogue:
-                return DialogueSceneName;
-            case GameState.Casing:
-                return CasingSceneName;
+            case GameState.MainMenu: return mainMenuSceneName;
+            case GameState.Map: return mapSceneName;
+            case GameState.Investigation: return investigationSceneName;
+            case GameState.Dialogue: return dialogueSceneName;
+            case GameState.Casing: return casingSceneName;
             default:
-                Debug.LogError($"Scene name not defined for GameState: {state}");
+                Debug.LogWarning($"No scene name defined for game state: {state}");
                 return null;
         }
     }
 
-    /// <summary>
-    /// Retrieves the data passed to the current state.
-    /// Call this in the Awake() or Start() of scripts in the newly loaded scene.
-    /// </summary>
-    public T GetCurrentStateData<T>() where T : class
-    {
-        return _currentStateData as T;
-    }
-
-    // --- Methods to GET and SET game state data (from your dialogue prototype's GameStateManager) ---
-
-    public bool CheckGlobalFlag(string flagId)
-    {
-        return GlobalFlags.ContainsKey(flagId) && GlobalFlags[flagId];
-    }
-
-    public void SetGlobalFlag(string flagId, bool value)
-    {
-        GlobalFlags[flagId] = value;
-        Debug.Log($"Flag '{flagId}' set to {value}");
-    }
-
-    public string GetCaseStatus(string caseId)
-    {
-        return CaseStatuses.ContainsKey(caseId) ? CaseStatuses[caseId] : "NotStarted";
-    }
-
-    public void SetCaseStatus(string caseId, string status)
-    {
-        CaseStatuses[caseId] = status;
-        Debug.Log($"Case '{caseId}' status set to {status}");
-    }
-
-    public bool CheckCaseFlag(string caseId, string flagId)
-    {
-        return CaseFlags.ContainsKey(caseId) && CaseFlags[caseId].ContainsKey(flagId) && CaseFlags[caseId][flagId];
-    }
-
-    public void SetCaseFlag(string caseId, string flagId, bool value)
-    {
-        if (!CaseFlags.ContainsKey(caseId))
-        {
-            CaseFlags[caseId] = new Dictionary<string, bool>();
-        }
-        CaseFlags[caseId][flagId] = value;
-        Debug.Log($"Case Flag '{caseId}/{flagId}' set to {value}");
-    }
-
-    public void CompleteCaseObjective(string caseId, string objectiveId)
-    {
-        if (!CompletedCaseObjectives.ContainsKey(caseId))
-        {
-            CompletedCaseObjectives[caseId] = new HashSet<string>();
-        }
-        if (CompletedCaseObjectives[caseId].Add(objectiveId))
-        {
-            Debug.Log($"Objective '{objectiveId}' for case '{caseId}' completed.");
-        }
-    }
-
-    public bool HasCompletedCaseObjective(string caseId, string objectiveId)
-    {
-        return CompletedCaseObjectives.ContainsKey(caseId) && CompletedCaseObjectives[caseId].Contains(objectiveId);
-    }
-
     public int GetSkillLevel(string skillName)
     {
-        return PlayerSkills.ContainsKey(skillName) ? PlayerSkills[skillName] : 0;
+        if (PlayerSkills.TryGetValue(skillName, out int level))
+        {
+            return level;
+        }
+        return 0;
     }
 
-    public void SetSkillLevel(string skillName, int level)
+    public void SetSkillLevel(string skillName, int newLevel)
     {
-        PlayerSkills[skillName] = level;
-        Debug.Log($"Skill '{skillName}' set to level {level}");
+        PlayerSkills[skillName] = newLevel; // Adds if not present, updates if present
+        Debug.Log($"Player skill '{skillName}' set to {newLevel}.");
     }
+
     public void ModifySkillLevel(string skillName, int amount)
     {
         if (!PlayerSkills.ContainsKey(skillName)) PlayerSkills[skillName] = 0;
@@ -232,7 +182,39 @@ public class GameStateManager : MonoBehaviour
         Debug.Log($"Skill '{skillName}' modified by {amount}. New level: {PlayerSkills[skillName]}");
     }
 
+    public void SetCaseFlag(string caseID, string flagName, bool value)
+    {
+        if (!CaseProgress.ContainsKey(caseID))
+        {
+            CaseProgress[caseID] = new Dictionary<string, object>();
+        }
+        CaseProgress[caseID][flagName] = value;
+        Debug.Log($"Case '{caseID}', Flag '{flagName}' set to {value}.");
+    }
 
+    public bool IsCaseFlagTrue(string caseID, string flagName)
+    {
+        if (CaseProgress.TryGetValue(caseID, out var flags))
+        {
+            if (flags.TryGetValue(flagName, out var value) && value is bool boolValue)
+            {
+                return boolValue;
+            }
+        }
+        return false;
+    }
+
+    public void CompleteCaseObjective(string caseID, string objectiveID, bool completed = true)
+    {
+        SetCaseFlag(caseID, "Objective_" + objectiveID, completed);
+    }
+
+    public bool IsObjectiveComplete(string caseID, string objectiveID)
+    {
+        return IsCaseFlagTrue(caseID, "Objective_" + objectiveID);
+    }
+    
+    // --- Visited Node and Global Flag methods from your existing script ---
     public void AddVisitedNode(string nodeId)
     {
         if (!VisitedNodeIds.Contains(nodeId))
@@ -246,17 +228,33 @@ public class GameStateManager : MonoBehaviour
         return VisitedNodeIds.Contains(nodeId);
     }
 
-    public void SetPlayerBackground(string background)
+    public bool CheckGlobalFlag(string flagId)
     {
-        PlayerBackground = background;
-        Debug.Log($"Player background set to: {background}");
+        return GlobalFlags.ContainsKey(flagId) && GlobalFlags[flagId];
     }
 
-    // Example method for investigation system to update police reputation
+    public void SetGlobalFlag(string flagId, bool value)
+    {
+        GlobalFlags[flagId] = value;
+        Debug.Log($"Global Flag '{flagId}' set to {value}");
+    }
+
+
+    public void SetCurrentStateData(object data)
+    {
+        currentStateData = data;
+    }
+
+    public T GetCurrentStateData<T>() where T : class
+    {
+        return currentStateData as T;
+    }
+
+    // Method for InvestigationManager to update police reputation
     public void UpdatePoliceReputation(float change)
     {
-        PoliceReputationModifier += change;
-        // You might want to clamp this value to a min/max range
+        policeReputationModifier += change;
+        policeReputationModifier = Mathf.Clamp(policeReputationModifier, -1f, 1f); // Example clamp
         Debug.Log($"Police Reputation Modifier changed by {change}. New value: {PoliceReputationModifier}");
     }
 }

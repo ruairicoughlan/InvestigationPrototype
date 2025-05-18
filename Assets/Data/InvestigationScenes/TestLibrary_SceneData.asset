@@ -13,7 +13,9 @@ MonoBehaviour:
   m_Name: TestLibrary_SceneData
   m_EditorClassIdentifier: 
   backgroundImage: {fileID: 21300000, guid: a0d52a26ced6b7b42a9266f55d948657, type: 3}
-  cluesInScene: []
+  cluesInScene:
+  - {fileID: 11400000, guid: e44a81c910680644c89adc4e6aa7a4cd, type: 2}
+  - {fileID: 11400000, guid: 2d90422b24c895c4c8ed74ad7da46cc8, type: 2}
   charactersInScene: []
   availableWitnesses: []
   basePoliceTimerSeconds: 120
