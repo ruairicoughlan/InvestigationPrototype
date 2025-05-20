@@ -1,0 +1,52 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5fd3b05e51798604798edc5dc009ad1e, type: 3}
+  m_Name: Case_001_Dewey
+  m_EditorClassIdentifier: 
+  CaseID: Case_001_Dewey
+  CaseName: Dewey Have A Problem
+  CaseProviderNPC_ID: Serena Kumar
+  MakeAvailable_Conditions: []
+  StartCase_Conditions: []
+  SuccessConditions:
+  - Type: 1
+    StringParameterID: FindEntryMethod
+    IntParameter: 0
+    RequiredBoolState: 1
+    TargetCaseIDForCondition: 
+  FailureConditions: []
+  OverallCaseDescription: "There\u2019s been a break in at the Concordia Public Library.
+    Who\u2019d want to steal something they can get for free..."
+  CaseLog: []
+  Objectives:
+  - ObjectiveID: FindEntryMethod
+    Text: '"Determine how the perpetrator entered the library."'
+    IsOptional: 0
+    TriggerToActivate: []
+    TriggerToComplete:
+    - Type: 0
+      StringParameterID: Ceiling_Inspected
+      IntParameter: 0
+      RequiredBoolState: 1
+      TargetCaseIDForCondition: 
+  RewardsOnSuccess:
+    Experience: 0
+    Reputation: []
+    NewPartyMembers: []
+    FlagsToSet: []
+  RewardsOnFailure:
+    Experience: 0
+    Reputation: []
+    NewPartyMembers: []
+    FlagsToSet: []
+  RewardsForOptionalObjectiveCompletion: []
+  RecommendedLevel: 1

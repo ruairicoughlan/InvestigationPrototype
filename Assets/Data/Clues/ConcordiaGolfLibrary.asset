@@ -19,7 +19,14 @@ MonoBehaviour:
   clueWorldSprite: {fileID: 21300000, guid: 4e76a27b33fdefa41a00958b2d41f41c, type: 3}
   worldPosition: {x: 600, y: -450}
   visualScale: {x: 4, y: 4}
-  colliderSize: {x: 10, y: 10}
+  colliderType: 0
+  boxColliderSize: {x: 10, y: 10}
+  boxColliderOffset: {x: 0, y: 0}
+  polygonColliderPoints:
+  - {x: -50, y: -50}
+  - {x: 50, y: -50}
+  - {x: 50, y: 50}
+  - {x: -50, y: 50}
   baseDescription: "Interesting. Someone dropped a membership card for the Concordia
     Golf Club. Emile Laurence.  Could be dropped at any point, but you\u2019d think
     someone would be cleaning up. But then again, it did sound like the library is

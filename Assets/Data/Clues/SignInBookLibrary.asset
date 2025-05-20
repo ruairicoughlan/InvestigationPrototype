@@ -19,7 +19,14 @@ MonoBehaviour:
   clueWorldSprite: {fileID: 21300000, guid: ee2eb0eb612c0e34e8fb9e2a66bb9f8c, type: 3}
   worldPosition: {x: 870, y: -180}
   visualScale: {x: 3, y: 3}
-  colliderSize: {x: 20, y: 20}
+  colliderType: 0
+  boxColliderSize: {x: 20, y: 20}
+  boxColliderOffset: {x: 0, y: 0}
+  polygonColliderPoints:
+  - {x: -50, y: -50}
+  - {x: 50, y: -50}
+  - {x: 50, y: 50}
+  - {x: -50, y: 50}
   baseDescription: A sign-in book, probably used to keep track of who was using the
     architectural archives.   Looks like nobody even came in here for years, until
     one Emile Laurence turns up.

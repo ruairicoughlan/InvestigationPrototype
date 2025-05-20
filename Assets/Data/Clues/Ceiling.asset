@@ -33,7 +33,7 @@ MonoBehaviour:
   cluePopupImage: {fileID: 21300000, guid: b880f68ca10b4fa4d8d46bf673a50cfd, type: 3}
   requiresSkillCheckForMoreInfo: 1
   skillCheckType: 4
-  skillCheckDC: 3
+  skillCheckDC: 0
   successDescription: "The skylight above could have been an entrance, I suppose.
     Although, now that I\u2019m looking at it, there\u2019s no signs of the locks
     or hatches being manipulated. \n\nIf the thief entered, they didn\u2019t break
@@ -41,7 +41,7 @@ MonoBehaviour:
     of the other doors look like there was a forced entry. They either picked the
     locks or had the doors opened...."
   failureDescription: The skylight above could have been an entrance, I suppose.
-  isKeyEvidence: 0
-  relatedCaseID: 
-  relatedObjectiveID: 
-  caseFlagToSet: 
+  isKeyEvidence: 1
+  relatedCaseID: Case_001_Dewey
+  relatedObjectiveID: FindEntryMethod
+  caseFlagToSet: Ceiling_Inspected

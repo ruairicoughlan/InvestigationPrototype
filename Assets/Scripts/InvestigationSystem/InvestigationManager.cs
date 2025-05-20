@@ -7,26 +7,16 @@ using System.Collections.Generic;
 public class InvestigationManager : MonoBehaviour
 {
     [Header("Scene Configuration")]
-    [Tooltip("Assign the InvestigationSceneData ScriptableObject for the current scene here in the Inspector.")]
     public InvestigationSceneData currentSceneData;
 
     [Header("Core UI References")]
-    [Tooltip("Drag the UI Image component for the panoramic background here.")]
     public Image backgroundImageUI;
-
-    [Tooltip("Drag an empty GameObject here to act as a parent for instantiated clue visuals/hotspots.")]
     public Transform cluesParent;
-
-    [Tooltip("Drag an empty GameObject here to act as a parent for instantiated character visuals.")]
     public Transform charactersParent;
 
     [Header("Prefabs")]
-    [Tooltip("Prefab that has the ClueInteractable script attached.")]
-    public GameObject cluePrefab; 
-
-    [Tooltip("Prefab that has the InteractiveObject script attached, used for characters (or a generic interactable).")]
-    public GameObject characterInteractiveObjectPrefab; 
-
+    public GameObject cluePrefab;
+    public GameObject characterInteractiveObjectPrefab;
 
     [Header("Police Timer UI")]
     public TextMeshProUGUI policeTimerText;
@@ -34,8 +24,8 @@ public class InvestigationManager : MonoBehaviour
     public Color policeTimerNormalColor = Color.white;
     public Color policeTimerWarningColor = Color.yellow;
     public Color policeTimerCriticalColor = Color.red;
-    public float warningThreshold = 0.5f; 
-    public float criticalThreshold = 0.25f; 
+    public float warningThreshold = 0.5f;
+    public float criticalThreshold = 0.25f;
 
     [Header("Clue Info Popup UI")]
     public GameObject clueInfoPopupPanel;
@@ -57,25 +47,44 @@ public class InvestigationManager : MonoBehaviour
     public GameObject characterThoughtBubblePanel;
     public TextMeshProUGUI characterThoughtText;
 
-    // Internal State
+    [Header("Case Update Notification UI")]
+    public GameObject caseUpdateNotificationPanel;
+    public TextMeshProUGUI caseUpdateNotificationText;
+    public float caseUpdateDisplayDuration = 2.5f;
+    public float caseUpdateAnimationDuration = 0.3f;
+    public Vector2 caseUpdateHiddenAnchoredPos = new Vector2(300, 0);
+    public Vector2 caseUpdateVisibleAnchoredPos = new Vector2(-10, 0);
+
+
     private float currentPoliceTimerValue;
     private float totalPoliceTimerDuration;
     private bool isTimerPaused = false;
     private List<ClueInteractable> activeCluesInScene = new List<ClueInteractable>();
     private List<GameObject> spawnedCharacterObjects = new List<GameObject>();
-    private List<GameObject> spawnedWitnessPopups = new List<GameObject>();
     private Coroutine characterThoughtCoroutine;
+    private Coroutine caseUpdateNotificationCoroutine;
+    private RectTransform caseUpdatePanelRectTransform;
+
+    private ClueData currentClueForPopup = null;
+    private GameStateManager gameStateManagerInstance;
+    private bool m_subscribedToEvents = false; // Flag to manage subscription state
+
 
     void Start()
     {
-        if (GameStateManager.Instance == null)
+        gameStateManagerInstance = GameStateManager.Instance;
+        if (gameStateManagerInstance == null)
         {
-            Debug.LogError("InvestigationManager: GameStateManager not found!");
-            enabled = false;
+            Debug.LogError("InvestigationManager Start: GameStateManager.Instance is null! Cannot subscribe to events or function correctly.");
+            enabled = false; // Disable this script if GSM is critical and missing
             return;
         }
 
-        InvestigationSceneData dataFromState = GameStateManager.Instance.GetCurrentStateData<InvestigationSceneData>();
+        // Subscribe to events here, now that gameStateManagerInstance is confirmed valid
+        SubscribeToGameStateEvents();
+
+
+        InvestigationSceneData dataFromState = gameStateManagerInstance.GetCurrentStateData<InvestigationSceneData>();
         if (dataFromState != null)
         {
             currentSceneData = dataFromState;
@@ -90,13 +99,76 @@ public class InvestigationManager : MonoBehaviour
 
         InitializeScene();
         InitializeUI();
+    }
 
-        if (GameStateManager.Instance != null)
+    void OnEnable()
+    {
+        // If the object was disabled and re-enabled, and we subscribed in Start and unsubscribed in OnDestroy,
+        // we might need to re-subscribe if GameStateManager is still valid.
+        // However, for a scene manager that's typically active once per scene load,
+        // Start/OnDestroy for subscriptions is often sufficient.
+        // If you have scenarios where InvestigationManager is frequently disabled/enabled
+        // while GameStateManager persists, you'd manage subscriptions more carefully here and in OnDisable.
+
+        // For now, let's assume Start/OnDestroy handles the primary lifecycle.
+        // If needed, re-subscription logic can be added here:
+        if (gameStateManagerInstance != null && !m_subscribedToEvents)
         {
-            GameStateManager.Instance.OnGameStateChanged.RemoveListener(HandleGameStateChanged);
-            GameStateManager.Instance.OnGameStateChanged.AddListener(HandleGameStateChanged);
+             // This implies Start might not have run (e.g. script was disabled initially) or OnDestroy cleared it.
+             // Or, more simply, if we choose OnEnable/OnDisable pattern for sub/unsub
+            Debug.LogWarning("InvestigationManager OnEnable: Attempting to subscribe to events as it seems Start might not have or was reset.");
+            SubscribeToGameStateEvents();
         }
     }
+
+    void SubscribeToGameStateEvents()
+    {
+        if (m_subscribedToEvents || gameStateManagerInstance == null) return;
+
+        gameStateManagerInstance.OnGameStateChanged.RemoveListener(HandleGameStateChanged); // Always remove first
+        gameStateManagerInstance.OnGameStateChanged.AddListener(HandleGameStateChanged);
+
+        gameStateManagerInstance.OnCaseOverallStatusChanged.RemoveListener(HandleCaseStatusUpdate);
+        gameStateManagerInstance.OnCaseOverallStatusChanged.AddListener(HandleCaseStatusUpdate);
+
+        gameStateManagerInstance.OnObjectiveStatusChanged.RemoveListener(HandleObjectiveStatusUpdate);
+        gameStateManagerInstance.OnObjectiveStatusChanged.AddListener(HandleObjectiveStatusUpdate);
+
+        m_subscribedToEvents = true;
+        Debug.Log("InvestigationManager: Successfully subscribed to GameStateManager events.");
+    }
+
+    void UnsubscribeFromGameStateEvents()
+    {
+        if (!m_subscribedToEvents || gameStateManagerInstance == null) return;
+
+        gameStateManagerInstance.OnGameStateChanged.RemoveListener(HandleGameStateChanged);
+        gameStateManagerInstance.OnCaseOverallStatusChanged.RemoveListener(HandleCaseStatusUpdate);
+        gameStateManagerInstance.OnObjectiveStatusChanged.RemoveListener(HandleObjectiveStatusUpdate);
+
+        m_subscribedToEvents = false;
+        Debug.Log("InvestigationManager: Unsubscribed from GameStateManager events.");
+    }
+
+
+    void OnDisable()
+    {
+        // If you adopt a strict OnEnable/OnDisable pattern for subscriptions for objects
+        // that are frequently enabled/disabled, you would unsubscribe here.
+        // UnsubscribeFromGameStateEvents(); // Example if using OnEnable/OnDisable for subscriptions
+
+        // Stop coroutines if the object is disabled, regardless of subscription pattern
+        if (characterThoughtCoroutine != null) StopCoroutine(characterThoughtCoroutine);
+        if (caseUpdateNotificationCoroutine != null) StopCoroutine(caseUpdateNotificationCoroutine);
+    }
+
+    void OnDestroy()
+    {
+        // Unsubscribe from events when this object is destroyed
+        UnsubscribeFromGameStateEvents();
+        ClearSpawnedObjects();
+    }
+
 
     void Update()
     {
@@ -106,19 +178,14 @@ public class InvestigationManager : MonoBehaviour
     void InitializeScene()
     {
         Debug.Log("InvestigationManager: Initializing scene with data: " + (currentSceneData != null ? currentSceneData.name : "NULL"));
-
         if (backgroundImageUI != null && currentSceneData != null && currentSceneData.backgroundImage != null)
         {
             backgroundImageUI.sprite = currentSceneData.backgroundImage;
         }
-        // ... (other background UI null checks)
-
         ClearSpawnedObjects();
-        SpawnClues(); 
-        SpawnCharacters(); 
-        SpawnWitnessPopups(); 
+        SpawnClues();
+        SpawnCharacters();
         SetupPoliceTimer();
-
         if (currentSceneData != null && !string.IsNullOrEmpty(currentSceneData.entryCharacterThought))
         {
             DisplayCharacterThought(currentSceneData.entryCharacterThought);
@@ -132,6 +199,19 @@ public class InvestigationManager : MonoBehaviour
         if (skillCheckDisplayPanel != null) skillCheckDisplayPanel.SetActive(false);
         if (characterThoughtBubblePanel != null) characterThoughtBubblePanel.SetActive(false);
 
+        if (caseUpdateNotificationPanel != null) {
+            caseUpdatePanelRectTransform = caseUpdateNotificationPanel.GetComponent<RectTransform>();
+            if (caseUpdatePanelRectTransform != null) {
+                caseUpdatePanelRectTransform.anchoredPosition = caseUpdateHiddenAnchoredPos;
+            } else {
+                Debug.LogError("CaseUpdateNotificationPanel is missing a RectTransform component!");
+            }
+            caseUpdateNotificationPanel.SetActive(false);
+        } else {
+            Debug.LogWarning("CaseUpdateNotificationPanel is not assigned in the Inspector.");
+        }
+
+
         if (cluePopupContinueButton != null)
         {
             cluePopupContinueButton.onClick.RemoveAllListeners();
@@ -143,36 +223,21 @@ public class InvestigationManager : MonoBehaviour
 
     void SpawnClues()
     {
-        if (currentSceneData == null || currentSceneData.cluesInScene == null) return;
-        if (cluePrefab == null) { Debug.LogError("Clue Prefab not assigned!"); return; }
-        
+        if (currentSceneData == null || currentSceneData.cluesInScene == null) { Debug.LogWarning("SpawnClues: No currentSceneData or cluesInScene list."); return; }
+        if (cluePrefab == null) { Debug.LogError("SpawnClues: Clue Prefab not assigned!"); return; }
         Transform parentToUse = cluesParent != null ? cluesParent : transform;
-
-        Debug.Log($"Spawning {currentSceneData.cluesInScene.Count} clues for scene '{currentSceneData.name}'.");
         foreach (ClueData clueData in currentSceneData.cluesInScene)
         {
-            if (clueData == null) { Debug.LogWarning("Null ClueData in list."); continue; }
-
+            if (clueData == null) { Debug.LogWarning("SpawnClues: Null ClueData in list."); continue; }
             GameObject clueObjectInstance = Instantiate(cluePrefab, parentToUse);
             clueObjectInstance.name = $"Clue_{(!string.IsNullOrEmpty(clueData.clueID) ? clueData.clueID : clueData.clueName)}";
-            
             clueObjectInstance.transform.localPosition = clueData.worldPosition;
-            clueObjectInstance.transform.localScale = new Vector3(clueData.visualScale.x, clueData.visualScale.y, 1f); // Apply visual scale
-
+            clueObjectInstance.transform.localScale = new Vector3(clueData.visualScale.x, clueData.visualScale.y, 1f);
             ClueInteractable clueScript = clueObjectInstance.GetComponent<ClueInteractable>();
             if (clueScript != null)
             {
-                clueScript.Initialize(clueData, this, GameStateManager.Instance);
-                
-                bool passesInitialPerception = true; 
-                if (clueData.initialPerceptionSkill != InvestigationSkillType.None && clueData.initialPerceptionDC > 0 && GameStateManager.Instance != null)
-                {
-                    passesInitialPerception = GameStateManager.Instance.GetSkillLevel(clueData.initialPerceptionSkill.ToString()) >= clueData.initialPerceptionDC;
-                }
-                clueObjectInstance.SetActive(passesInitialPerception);
-
-                if(passesInitialPerception) activeCluesInScene.Add(clueScript);
-                else Debug.Log($"Clue '{clueData.clueName}' initially inactive (Perception).");
+                clueScript.Initialize(clueData, this, gameStateManagerInstance);
+                activeCluesInScene.Add(clueScript);
             }
             else
             {
@@ -180,39 +245,40 @@ public class InvestigationManager : MonoBehaviour
                 Destroy(clueObjectInstance);
             }
         }
-        Debug.Log("Clue spawning complete. Active clues in list: " + activeCluesInScene.Count);
     }
 
-    void SpawnCharacters() {/* ... (placeholder) ... */}
-    void SpawnWitnessPopups() {/* ... (placeholder) ... */}
-    void SetupPoliceTimer() {/* ... (full logic as before) ... */
-        if (currentSceneData == null || GameStateManager.Instance == null) {
+    void SpawnCharacters() { /* Placeholder */ }
+
+    void SetupPoliceTimer() {
+        if (currentSceneData == null || gameStateManagerInstance == null) {
             Debug.LogError("Cannot setup police timer - currentSceneData or GameStateManager.Instance is missing.");
             if (policeTimerText != null) policeTimerText.text = "ERR";
             if (policeTimerBar != null) policeTimerBar.gameObject.SetActive(false);
-            enabled = false; 
+            enabled = false;
             return;
         }
-        float baseTime = currentSceneData.basePoliceTimerSeconds; 
-        float reputationModifier = GameStateManager.Instance.PoliceReputationModifier;
+        float baseTime = currentSceneData.basePoliceTimerSeconds;
+        float reputationModifier = gameStateManagerInstance.PoliceReputationModifier;
         totalPoliceTimerDuration = baseTime * (1f + reputationModifier);
-        totalPoliceTimerDuration = Mathf.Max(0.1f, totalPoliceTimerDuration); 
+        totalPoliceTimerDuration = Mathf.Max(0.1f, totalPoliceTimerDuration);
         currentPoliceTimerValue = totalPoliceTimerDuration;
         UpdatePoliceTimerUI();
-        PauseTimer(false); 
+        PauseTimer(false);
     }
-    void HandlePoliceTimer() {/* ... (full logic as before) ... */
+
+    void HandlePoliceTimer() {
         if (isTimerPaused || currentPoliceTimerValue <= 0) return;
         currentPoliceTimerValue -= Time.deltaTime;
         if (currentPoliceTimerValue <= 0) {
             currentPoliceTimerValue = 0;
             UpdatePoliceTimerUI();
             OnPoliceTimerEnd();
-            return; 
+            return;
         }
-        UpdatePoliceTimerUI(); 
+        UpdatePoliceTimerUI();
     }
-    void UpdatePoliceTimerUI() {/* ... (full logic as before) ... */
+
+    void UpdatePoliceTimerUI() {
         float displayValue = Mathf.Max(0f, currentPoliceTimerValue);
         if (policeTimerText != null) {
             int minutes = Mathf.FloorToInt(displayValue / 60F);
@@ -223,7 +289,7 @@ public class InvestigationManager : MonoBehaviour
                 if (percentageRemaining <= criticalThreshold) policeTimerText.color = policeTimerCriticalColor;
                 else if (percentageRemaining <= warningThreshold) policeTimerText.color = policeTimerWarningColor;
                 else policeTimerText.color = policeTimerNormalColor;
-            } else { 
+            } else {
                 policeTimerText.color = (displayValue <=0) ? policeTimerCriticalColor : policeTimerNormalColor;
             }
         }
@@ -232,40 +298,49 @@ public class InvestigationManager : MonoBehaviour
             else policeTimerBar.value = (displayValue > 0f && totalPoliceTimerDuration > 0.0001f) ? 1f : 0f;
         }
     }
-    void OnPoliceTimerEnd() {/* ... (full logic as before) ... */
+
+    void OnPoliceTimerEnd() {
         Debug.Log("Police Timer Ended! Player must leave.");
-        PauseTimer(true); 
+        PauseTimer(true);
         DisplayCharacterThought("The cops are here! I gotta bail!", 5f);
     }
-    public void PauseTimer(bool pause) {/* ... (full logic as before) ... */
+
+    public void PauseTimer(bool pause) {
         isTimerPaused = pause;
-        Debug.Log($"Timer Paused: {isTimerPaused}");
     }
-    public void DisplayCharacterThought(string thoughtText, float duration = 3f) {/* ... (full logic as before, ensure null checks) ... */
+
+    public void DisplayCharacterThought(string thoughtText, float duration = 3f) {
         if (string.IsNullOrEmpty(thoughtText) || characterThoughtBubblePanel == null || characterThoughtText == null) return;
         if (characterThoughtCoroutine != null) StopCoroutine(characterThoughtCoroutine);
         characterThoughtCoroutine = StartCoroutine(ShowThoughtCoroutine(thoughtText, duration));
     }
-    private IEnumerator ShowThoughtCoroutine(string thoughtText, float duration) {/* ... (full logic as before, ensure null checks & timer handling) ... */
-        if (characterThoughtText == null || characterThoughtBubblePanel == null) yield break; 
+
+    private IEnumerator ShowThoughtCoroutine(string thoughtText, float duration) {
+        if (characterThoughtText == null || characterThoughtBubblePanel == null) yield break;
         characterThoughtText.text = thoughtText;
         characterThoughtBubblePanel.SetActive(true);
         bool wasTimerPausedBeforeThought = isTimerPaused;
-        PauseTimer(true);
+        if (!wasTimerPausedBeforeThought) PauseTimer(true);
+
         float elapsedTime = 0f;
         while(elapsedTime < duration) {
-            if (Input.GetMouseButtonDown(0) || Input.anyKeyDown) break; 
-            elapsedTime += Time.unscaledDeltaTime; 
-            yield return null; 
+            if (Input.GetMouseButtonDown(0) || Input.anyKeyDown) break;
+            elapsedTime += Time.unscaledDeltaTime;
+            yield return null;
         }
         characterThoughtBubblePanel.SetActive(false);
         if (!wasTimerPausedBeforeThought && currentPoliceTimerValue > 0) PauseTimer(false);
         characterThoughtCoroutine = null;
     }
 
-    public void ShowClueInfoPopup(ClueData clueData, string descriptionToShow) {/* ... (full logic as before, ensure null checks) ... */
+    public void ShowClueInfoPopup(ClueData clueData, string descriptionToShow, ClueInteractable interactedClueScript = null)
+    {
         if (clueInfoPopupPanel == null || clueData == null) return;
+
+        currentClueForPopup = clueData;
+
         PauseTimer(true);
+        SetAllClueCollidersEnabled(false);
         clueInfoPopupPanel.SetActive(true);
         if (cluePopupNameText != null) cluePopupNameText.text = clueData.clueName;
         if (cluePopupDescriptionText != null) cluePopupDescriptionText.text = descriptionToShow;
@@ -274,85 +349,178 @@ public class InvestigationManager : MonoBehaviour
             cluePopupImageUI.gameObject.SetActive(clueData.cluePopupImage != null);
         }
     }
-    void CloseClueInfoPopup()  {/* ... (full logic as before) ... */
+
+    void CloseClueInfoPopup()  {
         if (clueInfoPopupPanel != null) clueInfoPopupPanel.SetActive(false);
-        if (currentPoliceTimerValue > 0) PauseTimer(false);
+        SetAllClueCollidersEnabled(true);
+
+        if (currentClueForPopup != null && currentClueForPopup.isKeyEvidence)
+        {
+            Debug.Log($"Clue '{currentClueForPopup.clueName}' is key evidence. Processing update after popup close.");
+
+            string relatedCaseID = currentClueForPopup.relatedCaseID?.Trim();
+            string relatedObjectiveID = currentClueForPopup.relatedObjectiveID?.Trim();
+            string caseFlagToSet = currentClueForPopup.caseFlagToSet?.Trim();
+
+            if (!string.IsNullOrEmpty(relatedCaseID) && gameStateManagerInstance != null)
+            {
+                gameStateManagerInstance.UpdateObjectiveFromClue(relatedCaseID, relatedObjectiveID, caseFlagToSet);
+            }
+            else if (gameStateManagerInstance == null)
+            {
+                 Debug.LogError("GameStateManager instance is null in CloseClueInfoPopup. Cannot update objective.");
+            }
+            else
+            {
+                Debug.LogWarning($"Clue '{currentClueForPopup.clueName}' is key evidence but has no relatedCaseID set (or it's whitespace).");
+            }
+        }
+        currentClueForPopup = null;
+
+        if (currentPoliceTimerValue > 0 && gameStateManagerInstance != null && gameStateManagerInstance.CurrentGameState == GameStateManager.GameState.Investigation)
+        {
+            PauseTimer(false);
+        }
     }
 
-    public void ShowSkillCheckUI(ClueData forClue, bool checkSucceeded) {/* ... (full logic as before, with detailed logs) ... */
-        Debug.Log($"ShowSkillCheckUI called for: {(forClue != null ? forClue.clueName : "NULL ClueData")}, Player Succeeded Pre-Check: {checkSucceeded}");
+    private void SetAllClueCollidersEnabled(bool enabledStatus) {
+        foreach (ClueInteractable clueScript in activeCluesInScene)
+        {
+            if (clueScript != null && clueScript.gameObject.activeSelf)
+            {
+                clueScript.SetColliderEnabled(enabledStatus);
+            }
+        }
+    }
+
+    public void ShowSkillCheckUI(ClueData forClue, bool checkSucceeded) {
         if (skillCheckDisplayPanel == null) { Debug.LogError("SkillCheckDisplayPanel NOT ASSIGNED!"); return; }
         if (forClue == null || !forClue.requiresSkillCheckForMoreInfo) {
             skillCheckDisplayPanel.SetActive(false); return;
         }
-        Debug.Log($"SkillCheckDisplayPanel: Before SetActive(true) - local: {skillCheckDisplayPanel.activeSelf}, world: {skillCheckDisplayPanel.activeInHierarchy}");
         skillCheckDisplayPanel.SetActive(true);
-        Debug.Log($"SkillCheckDisplayPanel: After SetActive(true) - local: {skillCheckDisplayPanel.activeSelf}, world: {skillCheckDisplayPanel.activeInHierarchy}");
         if (skillCheckDisplayPanel.activeInHierarchy) {
             if (skillCheckValueText != null) skillCheckValueText.text = forClue.skillCheckDC.ToString();
             if (skillCheckSkillNameText != null) skillCheckSkillNameText.text = forClue.skillCheckType.ToString();
             if (skillCheckCircleImage != null) skillCheckCircleImage.color = checkSucceeded ? skillCheckSuccessColor : skillCheckFailureColor;
-            Debug.Log($"Successfully displayed Skill Check UI for '{forClue.clueName}'");
         } else {
             Debug.LogError($"SkillCheckDisplayPanel FAILED to activate. Check parent hierarchy!");
         }
     }
-    public void HideSkillCheckUI() {/* ... (full logic as before) ... */
+
+    public void HideSkillCheckUI() {
         if (skillCheckDisplayPanel != null) skillCheckDisplayPanel.SetActive(false);
     }
-    public void UpdateCluePerceptionChecks() {/* ... (full logic as before) ... */
-        if (GameStateManager.Instance == null) return;
+
+    public void UpdateCluePerceptionChecks() {
+         if (gameStateManagerInstance == null) return;
         foreach (ClueInteractable clueScript in activeCluesInScene) {
-            if (clueScript != null && !clueScript.gameObject.activeSelf) clueScript.UpdateInteractableState(); 
+            if (clueScript != null) clueScript.UpdateInteractableState();
         }
     }
-    void ClearSpawnedObjects() {/* ... (full logic as before, ensuring correct list types) ... */
+
+    void ClearSpawnedObjects() {
         foreach (ClueInteractable clueScript in activeCluesInScene) if (clueScript != null) Destroy(clueScript.gameObject);
         activeCluesInScene.Clear();
         foreach (GameObject obj in spawnedCharacterObjects) if (obj != null) Destroy(obj);
         spawnedCharacterObjects.Clear();
-        foreach (GameObject obj in spawnedWitnessPopups) if (obj != null) Destroy(obj);
-        spawnedWitnessPopups.Clear();
-        Debug.Log("All spawned objects cleared.");
     }
-    public void OnReturnedFromDialogue(object dialogueOutcomeData) {/* ... (full logic as before) ... */
-        if (currentPoliceTimerValue > 0) PauseTimer(false);
-    }
-    void OnEnable()  {/* ... (full logic as before with Add/RemoveListener) ... */
-        if (GameStateManager.Instance != null) {
-            GameStateManager.Instance.OnGameStateChanged.RemoveListener(HandleGameStateChanged);
-            GameStateManager.Instance.OnGameStateChanged.AddListener(HandleGameStateChanged);
+
+    private void HandleCaseStatusUpdate(CaseData caseData, CaseOverallStatus oldStatus, CaseOverallStatus newStatus)
+    {
+        if (caseData == null) return;
+        Debug.Log($"HandleCaseStatusUpdate: Case '{caseData.CaseName}' changed from {oldStatus} to {newStatus}");
+
+        if ( (oldStatus == CaseOverallStatus.Inactive && newStatus == CaseOverallStatus.InProgress) ||
+             (oldStatus == CaseOverallStatus.InProgress && (newStatus == CaseOverallStatus.Successful || newStatus == CaseOverallStatus.Failed)) )
+        {
+            ShowCaseUpdateNotification("Case Updated");
         }
     }
-    void OnDisable() {/* ... (full logic as before with RemoveListener) ... */
-         if (GameStateManager.Instance != null) GameStateManager.Instance.OnGameStateChanged.RemoveListener(HandleGameStateChanged);
-        if (characterThoughtCoroutine != null) StopCoroutine(characterThoughtCoroutine);
+
+    private void HandleObjectiveStatusUpdate(CaseData caseData, CaseObjectiveDefinition objectiveDef, ObjectiveStatus oldStatus, ObjectiveStatus newStatus)
+    {
+        if (caseData == null || objectiveDef == null) return;
+        Debug.Log($"HandleObjectiveStatusUpdate: Objective '{objectiveDef.ObjectiveID}' in Case '{caseData.CaseName}' changed from {oldStatus} to {newStatus}");
+
+        if ( (oldStatus == ObjectiveStatus.Inactive && newStatus == ObjectiveStatus.Active) ||
+             (oldStatus == ObjectiveStatus.Active && newStatus == ObjectiveStatus.Completed) )
+        {
+            ShowCaseUpdateNotification("Case Updated");
+        }
     }
-    void OnDestroy()  {/* ... (full logic as before with RemoveListener) ... */
-        if (GameStateManager.Instance != null) GameStateManager.Instance.OnGameStateChanged.RemoveListener(HandleGameStateChanged);
-        ClearSpawnedObjects();
+
+    public void ShowCaseUpdateNotification(string message)
+    {
+        if (caseUpdateNotificationPanel == null || caseUpdatePanelRectTransform == null || caseUpdateNotificationText == null)
+        {
+            Debug.LogWarning("Case Update Notification UI not fully assigned. Cannot show notification. Message: " + message);
+            return;
+        }
+        Debug.Log("ShowCaseUpdateNotification: " + message);
+
+        if (caseUpdateNotificationCoroutine != null)
+        {
+            StopCoroutine(caseUpdateNotificationCoroutine);
+            caseUpdatePanelRectTransform.anchoredPosition = caseUpdateHiddenAnchoredPos;
+            caseUpdateNotificationPanel.SetActive(false);
+        }
+        caseUpdateNotificationCoroutine = StartCoroutine(AnimateCaseUpdateNotification(message));
     }
-    private void HandleGameStateChanged(GameStateManager.GameState newState, object data) {/* ... (full logic as before, with careful checks for data and currentSceneData) ... */
+
+    private IEnumerator AnimateCaseUpdateNotification(string message)
+    {
+        if (caseUpdateNotificationText == null || caseUpdateNotificationPanel == null || caseUpdatePanelRectTransform == null) yield break;
+
+        caseUpdateNotificationText.text = message;
+        caseUpdateNotificationPanel.SetActive(true);
+        caseUpdatePanelRectTransform.anchoredPosition = caseUpdateHiddenAnchoredPos;
+
+        float elapsedTime = 0f;
+        while (elapsedTime < caseUpdateAnimationDuration)
+        {
+            caseUpdatePanelRectTransform.anchoredPosition = Vector2.Lerp(caseUpdateHiddenAnchoredPos, caseUpdateVisibleAnchoredPos, elapsedTime / caseUpdateAnimationDuration);
+            elapsedTime += Time.unscaledDeltaTime;
+            yield return null;
+        }
+        caseUpdatePanelRectTransform.anchoredPosition = caseUpdateVisibleAnchoredPos;
+
+        yield return new WaitForSecondsRealtime(caseUpdateDisplayDuration);
+
+        elapsedTime = 0f;
+        while (elapsedTime < caseUpdateAnimationDuration)
+        {
+            caseUpdatePanelRectTransform.anchoredPosition = Vector2.Lerp(caseUpdateVisibleAnchoredPos, caseUpdateHiddenAnchoredPos, elapsedTime / caseUpdateAnimationDuration);
+            elapsedTime += Time.unscaledDeltaTime;
+            yield return null;
+        }
+        caseUpdatePanelRectTransform.anchoredPosition = caseUpdateHiddenAnchoredPos;
+
+        caseUpdateNotificationPanel.SetActive(false);
+        caseUpdateNotificationCoroutine = null;
+    }
+
+
+    private void HandleGameStateChanged(GameStateManager.GameState newState, object data) {
         if (this == null || !gameObject.activeInHierarchy || !enabled ) return;
         if (newState == GameStateManager.GameState.Investigation) {
             InvestigationSceneData dataFromState = data as InvestigationSceneData;
             if (dataFromState != null && (currentSceneData == null || currentSceneData.name != dataFromState.name)) {
-                currentSceneData = dataFromState; InitializeScene(); InitializeUI();    
+                currentSceneData = dataFromState; InitializeScene(); InitializeUI();
             } else if (dataFromState != null && currentSceneData == dataFromState) {
                  if (clueInfoPopupPanel != null && clueInfoPopupPanel.activeSelf) CloseClueInfoPopup();
                  if (characterThoughtBubblePanel != null && characterThoughtBubblePanel.activeSelf) characterThoughtBubblePanel.SetActive(false);
                  if (skillCheckDisplayPanel != null && skillCheckDisplayPanel.activeSelf) HideSkillCheckUI();
                  if (currentPoliceTimerValue > 0) PauseTimer(false);
             } else if (data != null && !(data is InvestigationSceneData)) {
-                OnReturnedFromDialogue(data);
+                if (currentPoliceTimerValue > 0) PauseTimer(false);
             } else if (data == null && currentSceneData == null) {
-                Debug.LogError("Investigation scene loaded but no InvestigationSceneData available!"); enabled = false; 
+                Debug.LogError("Investigation scene loaded but no InvestigationSceneData available!"); enabled = false;
             } else if (data == null && currentSceneData != null) {
                  if (currentPoliceTimerValue > 0) PauseTimer(false);
             }
         } else {
             PauseTimer(true);
-            if (clueInfoPopupPanel != null && clueInfoPopupPanel.activeSelf) CloseClueInfoPopup(); 
             if (skillCheckDisplayPanel != null && skillCheckDisplayPanel.activeSelf) HideSkillCheckUI();
             if (characterThoughtBubblePanel != null && characterThoughtCoroutine != null) {
                 StopCoroutine(characterThoughtCoroutine); characterThoughtCoroutine = null; characterThoughtBubblePanel.SetActive(false);
